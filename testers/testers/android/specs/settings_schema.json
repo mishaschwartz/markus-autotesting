@@ -1,0 +1,82 @@
+{
+  "type": "object",
+  "properties": {
+    "tester_type": {
+      "type": "string",
+      "enum": [
+        "android"
+      ]
+    },
+    "env_data": {
+      "title": "Android environment",
+      "type": "object",
+      "properties": {
+        "maven_cache_dependencies": {
+          "title": "Cache dependencies",
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "test_data": {
+      "title": "Test Groups",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "maven_test_cases",
+          "timeout"
+        ],
+        "properties": {
+          "maven_test_cases" : {
+            "title": "Maven test cases",
+            "type": "string",
+            "default": ""
+          },
+          "category": {
+            "title": "Category",
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/test_data_categories"
+            },
+            "uniqueItems": true
+          },
+          "timeout": {
+            "title": "Timeout",
+            "type": "integer",
+            "default": 30
+          },
+          "feedback_file_name": {
+            "title": "Feedback file",
+            "type": "string"
+          },
+          "show_traceback": {
+            "title": "Show full traceback",
+            "type": "boolean",
+            "default": false
+          },
+          "extra_info": {
+            "$ref": "#/definitions/extra_group_data"
+          }
+        },
+        "dependencies": {
+          "feedback_file_name": {
+            "properties": {
+              "upload_feedback_to_repo": {
+                "title": "Add feedback file to repo",
+                "type": "boolean",
+                "default": false
+              },
+              "upload_feedback_file": {
+                "title": "Upload feedback file for grading",
+                "type": "boolean",
+                "default": false
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

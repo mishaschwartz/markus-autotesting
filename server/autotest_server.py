@@ -52,7 +52,8 @@ PORT_MAX = 65535
 # have at least n=(value) resources more than tester processes 
 RLIMIT_ADJUSTMENTS = {'RLIMIT_NPROC': 10}
 
-TESTER_IMPORT_LINE = {'custom' : 'from testers.custom.markus_custom_tester import MarkusCustomTester as Tester',
+TESTER_IMPORT_LINE = {'android' : 'from testers.android.markus_android_tester import MarkusAndroidTester as Tester',
+                      'custom' : 'from testers.custom.markus_custom_tester import MarkusCustomTester as Tester',
                       'haskell' : 'from testers.haskell.markus_haskell_tester import MarkusHaskellTester as Tester',
                       'java' : 'from testers.java.markus_java_tester import MarkusJavaTester as Tester',
                       'jdbc' : 'from testers.jdbc.markus_jdbc_tester import MarkusJDBCTester as Tester',
