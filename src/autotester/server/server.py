@@ -20,7 +20,6 @@ from autotester.server.utils.user_management import (
     tester_user,
 )
 from autotester.server.utils.file_management import (
-    random_tmpfile_name,
     copy_tree,
     ignore_missing_dir_error,
     fd_open,
@@ -117,17 +116,17 @@ def _kill_with_reaper(test_username: str) -> bool:
     reaper_username = get_reaper_username(test_username)
     if reaper_username is not None:
         cwd = os.path.dirname(os.path.abspath(__file__))
-        kill_file_dst = random_tmpfile_name()
 
-        copy_cmd = "sudo -u {0} -- bash -c 'cp kill_worker_procs {1} && chmod 4550 {1}'".format(
-            test_username, kill_file_dst
-        )
-        copy_proc = subprocess.Popen(copy_cmd, shell=True, preexec_fn=set_rlimits_before_cleanup, cwd=cwd)
-        if copy_proc.wait() < 0:  # wait returns the return code of the proc
-            return False
+        with tempfile.NamedTemporaryFile() as f:
+            copy_cmd = "sudo -u {0} -- bash -c 'cp kill_worker_procs {1} && chmod 4550 {1}'".format(
+                test_username, f.name
+            )
+            copy_proc = subprocess.Popen(copy_cmd, shell=True, preexec_fn=set_rlimits_before_cleanup, cwd=cwd)
+            if copy_proc.wait() < 0:  # wait returns the return code of the proc
+                return False
 
-        kill_cmd = "sudo -u {} -- bash -c {}".format(reaper_username, kill_file_dst)
-        kill_proc = subprocess.Popen(kill_cmd, shell=True, preexec_fn=set_rlimits_before_cleanup)
+            kill_cmd = "sudo -u {} -- bash -c {}".format(reaper_username, f.name)
+            kill_proc = subprocess.Popen(kill_cmd, shell=True, preexec_fn=set_rlimits_before_cleanup)
         return kill_proc.wait() == 0
     return False
 

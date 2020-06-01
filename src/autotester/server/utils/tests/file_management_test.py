@@ -1,387 +1,303 @@
-from autotester.server.utils.file_management import (
-    clean_dir_name,
-    random_tmpfile_name,
-    recursive_iglob,
-    copy_tree,
-    ignore_missing_dir_error,
-    fd_open,
-)
-import os.path
-import tempfile
-import shutil
-from autotester.config import config
+import os
 import pytest
-from fakeredis import FakeStrictRedis
-from unittest.mock import patch
+import tempfile
+import contextlib
+import shutil
+import time
+import zipfile
+import multiprocessing
+from io import BytesIO
+from hypothesis import given
+from hypothesis import strategies as st
+from typing import Union, List
+from autotester.server.utils import file_management as fm
 
 
-FILES_DIRNAME = config["_workspace_contents", "_files_dir"]
-CURRENT_TEST_SCRIPT_HASH = config["redis", "_current_test_script_hash"]
+@st.composite
+def nested_dir_structure(draw) -> Union[List, int]:
+    """ Return a recursively nested list of lists of integers """
+    dirs = draw(st.recursive(st.integers(min_value=1, max_value=5), st.lists, max_leaves=10))
+    if isinstance(dirs, int):
+        dirs = [dirs]
+    return dirs
 
 
-@pytest.fixture
-def empty_dir():
-    """
-    Yields an empty directory
-    """
-    empty_dir = tempfile.TemporaryDirectory()
-    yield empty_dir.name
-    if os.path.exists(empty_dir.name):
-        empty_dir.cleanup()
+def _nested_dirs(
+    structure: Union[List, int], stack: contextlib.ExitStack, dirname: str = None
+) -> Union[None, tempfile.NamedTemporaryFile, tempfile.TemporaryDirectory]:
+    """ Helper method for nested_dirs """
+    if isinstance(structure, int):
+        for _ in range(structure):
+            stack.enter_context(tempfile.NamedTemporaryFile(dir=dirname))
+    else:
+        d = tempfile.TemporaryDirectory(dir=dirname)
+        stack.enter_context(d)
+        for struc in structure:
+            _nested_dirs(struc, stack, d.name)
+        return d
 
 
-@pytest.fixture
-def dir_has_one_file():
-    """
-    Yields a directory which has only one file
-    """
-    tmp_dir = tempfile.TemporaryDirectory()
-    tmp_file = tempfile.NamedTemporaryFile(dir=tmp_dir.name)
-    yield tmp_dir.name, tmp_file.name
-    if os.path.exists(tmp_dir.name):
-        tmp_dir.cleanup()
+@contextlib.contextmanager
+def nested_dirs(structure: List) -> tempfile.TemporaryDirectory:
+    """ Creates temporary nested directories based on <structure> """
+    with contextlib.ExitStack() as stack:
+        yield _nested_dirs(structure, stack)
 
 
-@pytest.fixture
-def dir_has_one_dir():
-    """
-    Yields a directory with one subdirectory
-    """
-    tmp_dir = tempfile.TemporaryDirectory()
-    sub_dir = tempfile.TemporaryDirectory(dir=tmp_dir.name)
-    yield tmp_dir.name, sub_dir.name
-    if os.path.exists(tmp_dir.name):
-        tmp_dir.cleanup()
+def zip_archive(structure: List) -> bytes:
+    """ Creates a zip archive of nested files/directories based on <structure> """
+    with tempfile.NamedTemporaryFile() as f:
+        with nested_dirs(structure) as d:
+            with zipfile.ZipFile(f.name, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for root, _, fnames in os.walk(d.name):
+                    root_path = os.path.relpath(root, d.name)
+                    zipf.write(root, arcname=root_path)
+                    for file in fnames:
+                        zipf.write(os.path.join(root, file), arcname=os.path.join(root_path, file))
+        f.seek(0)
+        return f.read()
 
 
-@pytest.fixture
-def dir_has_multiple_fd():
-    """
-    Yields a directory which has multiple files and directories
-    """
-    root_dir = tempfile.TemporaryDirectory()
-    dir1 = tempfile.TemporaryDirectory(dir=root_dir.name)
-    file1 = tempfile.NamedTemporaryFile(dir=root_dir.name)
-    tempfile.TemporaryDirectory(dir=root_dir.name)
-    tempfile.NamedTemporaryFile(dir=root_dir.name)
-    yield root_dir.name, dir1.name, file1.name
-    if os.path.exists(root_dir.name):
-        root_dir.cleanup()
+class TestCleanDirName:
+    @given(st.from_regex(r"[^/]+", fullmatch=True))
+    def test_no_forward_slash(self, name: str):
+        """ Should not change a name that does not contain a forward slash character """
+        assert fm.clean_dir_name(name) == name
 
-
-@pytest.fixture
-def nested_fd():
-    """
-    Yields a nested file structure
-    """
-    root_dir = tempfile.TemporaryDirectory()
-    sub_dir1 = tempfile.TemporaryDirectory(dir=root_dir.name)
-    sub_dir2 = tempfile.TemporaryDirectory(dir=sub_dir1.name)
-    file = tempfile.NamedTemporaryFile(dir=sub_dir2.name)
-    yield root_dir.name, sub_dir1.name, sub_dir2.name, file.name
-    if os.path.exists(root_dir.name):
-        root_dir.cleanup()
-
-
-@pytest.fixture(autouse=True)
-def redis():
-    """
-    Mock the redis connection with fake redis and yield the fake redis
-    """
-    fake_redis = FakeStrictRedis()
-    with patch(
-        "autotester.server.utils.redis_management.redis_connection",
-        return_value=fake_redis,
-    ):
-        yield fake_redis
-
-
-@pytest.fixture
-def empty_tmp_script_dir():
-    """
-    Mock the test_script_directory method and yield an empty temporary directory
-    """
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        files_dir = os.path.join(tmp_dir, FILES_DIRNAME)
-        os.mkdir(files_dir)
-        with patch(
-            "autotester.server.utils.redis_management.test_script_directory",
-            return_value=tmp_dir,
-        ):
-            yield tmp_dir
-
-
-@pytest.fixture
-def tmp_script_outer_dir():
-    """
-    Mock the test_script_directory method and yield a temporary directory
-    which has no subdirectory from FILES_DIRNAME but has other file or directory
-    """
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        tempfile.NamedTemporaryFile(dir=tmp_dir)
-        tempfile.TemporaryDirectory(dir=tmp_dir)
-        with patch(
-            "autotester.server.utils.redis_management.test_script_directory",
-            return_value=tmp_dir,
-        ):
-            yield tmp_dir
-
-
-@pytest.fixture
-def tmp_script_dir_with_one_file():
-    """
-    Mock the test_script_directory method and yield a temporary directory which has only one file
-    """
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        files_dir = os.path.join(tmp_dir, FILES_DIRNAME)
-        os.mkdir(files_dir)
-        tempfile.NamedTemporaryFile(dir=files_dir)
-        with patch(
-            "autotester.server.utils.redis_management.test_script_directory",
-            return_value=tmp_dir,
-        ):
-            yield tmp_dir
-
-
-@pytest.fixture
-def tmp_script_dir_with_one_dir():
-    """
-    Mock the test_script_directory method and yield a temporary directory which has only one subdirectory
-    """
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        files_dir = os.path.join(tmp_dir, FILES_DIRNAME)
-        os.mkdir(files_dir)
-        tempfile.TemporaryDirectory(dir=files_dir)
-        with patch(
-            "autotester.server.utils.redis_management.test_script_directory",
-            return_value=tmp_dir,
-        ):
-            yield tmp_dir
-
-
-@pytest.fixture
-def nested_tmp_script_dir():
-    """
-    Mock the test_script_directory method and yield a temporary directory which has nested file structure
-    """
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        files_dir = os.path.join(tmp_dir, FILES_DIRNAME)
-        os.mkdir(files_dir)
-        with tempfile.TemporaryDirectory(dir=files_dir) as sub_dir1:
-            with tempfile.TemporaryDirectory(dir=sub_dir1) as sub_dir2:
-                tempfile.NamedTemporaryFile(dir=sub_dir2)
-                with patch(
-                    "autotester.server.utils.redis_management.test_script_directory",
-                    return_value=tmp_dir,
-                ):
-                    yield tmp_dir
-
-
-@pytest.fixture
-def tmp_script_dir_has_multiple_fd():
-    """
-    Mock the test_script_directory method and yield a temporary directory
-    which has more than one file or directory
-    """
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        files_dir = os.path.join(tmp_dir, FILES_DIRNAME)
-        os.mkdir(files_dir)
-        tempfile.TemporaryDirectory(dir=files_dir)
-        tempfile.NamedTemporaryFile(dir=files_dir)
-        with tempfile.TemporaryDirectory(dir=files_dir) as root_dir:
-            with tempfile.TemporaryDirectory(dir=root_dir) as sub_dir:
-                tempfile.NamedTemporaryFile(dir=sub_dir)
-                with patch(
-                    "autotester.server.utils.redis_management.test_script_directory",
-                    return_value=tmp_dir,
-                ):
-                    yield tmp_dir
-
-
-def list_of_fd(file_or_dir):
-    """
-    Gets a list of files and directories and returns two separate lists for files and directories
-    """
-    dirs = []
-    files = []
-    for i in file_or_dir:
-        dirs.append(i[1]) if i[0] == "d" else files.append(i[1])
-    return dirs, files
-
-
-def test_clean_dir_name():
-    """
-    Checks whether '/' is replaced by '_' for a given path
-    """
-    a = "markus/address"
-    b = a.replace("/", "_")
-    assert clean_dir_name(a) == b
-
-
-def test_random_tmpfile_name():
-    """
-    Checks the temporary file name is random
-    """
-    tmp_file_1 = random_tmpfile_name()
-    tmp_file_2 = random_tmpfile_name()
-    assert not tmp_file_1 == tmp_file_2
+    @given(st.from_regex(r"(?:.*/.*)+", fullmatch=True))
+    def test_with_forward_slash_modified(self, name: str):
+        """ Should replace forward slashes with underscores """
+        assert fm.clean_dir_name(name).replace("/", "_")
 
 
 class TestRecursiveIglob:
-    """
-    Checks that all the files and directories of a given path are listed
-    """
 
-    def test_empty_dir(self, empty_dir):
-        """
-        When the directory is empty
-        """
-        dirs, files = list_of_fd(recursive_iglob(empty_dir))
-        assert not dirs and not files
+    def file_counter(self, struc):
+        if isinstance(struc, int):
+            return struc
+        return sum(self.file_counter(s) for s in struc)
 
-    def test_dir_has_one_file(self, dir_has_one_file):
-        """
-        When the directory has only one file
-        """
-        root_dir, file = dir_has_one_file
-        dirs, files = list_of_fd(recursive_iglob(root_dir))
-        assert not dirs
-        assert len(files) == 1 and file in files
-        assert all(os.path.exists(f) for f in files)
+    def dir_counter(self, struc):
+        if isinstance(struc, int):
+            return 0
+        return 1 + sum(self.dir_counter(s) for s in struc)
 
-    def test_dir_has_one_dir(self, dir_has_one_dir):
-        """
-        When the directory has only one subdirectory
-        """
-        root_dir, sub_dir = dir_has_one_dir
-        dirs, files = list_of_fd(recursive_iglob(root_dir))
-        assert not files
-        assert len(dirs) == 1 and sub_dir in dirs
-        assert all(os.path.exists(d) for d in dirs)
+    @given(nested_dir_structure())
+    def test_yield_all_files(self, structure):
+        """ Should find all files recursively in the directory """
+        with nested_dirs(structure) as d:
+            files = [fname for fd, fname in fm.recursive_iglob(d.name) if fd == 'f']
+            assert len(files) == self.file_counter(structure)
 
-    def test_dir_has_nested_fd(self, nested_fd):
-        """
-        When the files are nested in subdirectories more than 2 directories deep
-        """
-        root_dir, sub_dir1, sub_dir2, file = nested_fd
-        dirs, files = list_of_fd(recursive_iglob(root_dir))
-        assert all(os.path.exists(d) for d in dirs)
-        assert all(os.path.exists(f) for f in files)
-        assert sub_dir1 in dirs and sub_dir2 in dirs
-        assert file in files
+    @given(nested_dir_structure())
+    def test_yield_all_dirs(self, structure):
+        """ Should find all files recursively in the directory """
+        with nested_dirs(structure) as d:
+            dirs = [dname for fd, dname in fm.recursive_iglob(d.name) if fd == 'd']
+            assert len(dirs) + 1 == self.dir_counter(structure)  # +1 to include the root directory
+
+    @given(nested_dir_structure())
+    def test_order_is_correct(self, structure):
+        """ Should navigate the directory breadth first """
+        with nested_dirs(structure) as d:
+            visited = [d.name]
+            for fd, name in fm.recursive_iglob(d.name):
+                dir_name = os.path.dirname(name)
+                assert dir_name in visited  # yielded child before parent
+                if fd == 'd':
+                    visited.append(name)
 
 
 class TestCopyTree:
-    """
-    Checks that all the contents are copied from source to destination
-    """
 
-    def test_empty_dir(self, empty_dir, dir_has_one_file):
-        """
-        When the source directory is empty and the destination directory is not empty
-        """
-        source_dir = empty_dir
-        dest_dir, file = dir_has_one_file
-        list_fd_before_copy = os.listdir(dest_dir)
-        copied_file_or_dir = copy_tree(source_dir, dest_dir)
-        list_fd_after_copy = os.listdir(dest_dir)
-        assert len(list_fd_before_copy) == len(list_fd_after_copy)
-        assert not copied_file_or_dir
+    @staticmethod
+    def files_from_walk(src):
+        return [os.path.relpath(os.path.join(root, name), src)
+                for root, dnames, fnames in os.walk(src)
+                for name in dnames + fnames]
 
-    def test_dir_has_one_file(self, dir_has_one_file, empty_dir):
-        """
-        When the source directory has only one file
-        """
-        source_dir, source_file = dir_has_one_file
-        dest_dir = empty_dir
-        copied_file_or_dir = copy_tree(source_dir, dest_dir)
-        for _fd, file_or_dir in copied_file_or_dir:
-            assert os.path.exists(file_or_dir)
+    @given(nested_dir_structure())
+    def test_files_are_created(self, structure):
+        """ Should create copies of all files """
+        with nested_dirs(structure) as src:
+            with tempfile.TemporaryDirectory() as dst_name:
+                fm.copy_tree(src.name, dst_name)
+                assert self.files_from_walk(src.name) == self.files_from_walk(dst_name)
 
-    def test_dir_has_one_dir(self, dir_has_one_dir, empty_dir):
-        """
-        When the source directory has only one subdirectory
-        """
-        source_dir, sub_dir = dir_has_one_dir
-        dest_dir = empty_dir
-        copied_file_or_dir = copy_tree(source_dir, dest_dir)
-        for _fd, file_or_dir in copied_file_or_dir:
-            assert os.path.exists(file_or_dir)
+    @given(nested_dir_structure())
+    def test_src_files_not_moved(self, structure):
+        """ Should not move/delete source files """
+        with nested_dirs(structure) as src:
+            with tempfile.TemporaryDirectory() as dst_name:
+                prev_files = self.files_from_walk(src.name)
+                fm.copy_tree(src.name, dst_name)
+                assert prev_files == self.files_from_walk(src.name)
 
-    def test_dir_has_nested_fd(self, empty_dir, nested_fd):
-        """
-        When the files are nested in subdirectories more than 2 directories deep
-        """
-        dest_dir = empty_dir
-        source_dir, sub_dir1, sub_dir2, source_file = nested_fd
-        copied_file_or_dir = copy_tree(source_dir, dest_dir)
-        for _fd, file_or_dir in copied_file_or_dir:
-            assert os.path.exists(file_or_dir)
-
-    def test_dir_has_multiple_fd(self, empty_dir, dir_has_multiple_fd):
-        """
-        When the source directory has more than one file or directory
-        """
-        dest_dir = empty_dir
-        source_dir, *_ = dir_has_multiple_fd
-        copied_file_or_dir = copy_tree(source_dir, dest_dir)
-        for _fd, file_or_dir in copied_file_or_dir:
-            assert os.path.exists(file_or_dir)
-
-    def test_exclude(self, empty_dir, dir_has_multiple_fd):
-        """
-        Checks whether the files or directories in the exclude list are not copied
-        """
-        dest_dir = empty_dir
-        source_dir, sub_dir, source_file = dir_has_multiple_fd
-        sub_dir_name = os.path.basename(sub_dir)
-        source_file_name = os.path.basename(source_file)
-        copied_file_or_dir = copy_tree(
-            source_dir, dest_dir, exclude=(sub_dir_name, source_file_name)
-        )
-        for _fd, file_or_dir in copied_file_or_dir:
-            assert os.path.exists(file_or_dir)
-        excluded_dir = os.path.join(dest_dir, sub_dir_name)
-        excluded_file = os.path.join(dest_dir, source_file_name)
-        assert not os.path.exists(excluded_dir)
-        assert not os.path.exists(excluded_file)
+    @given(nested_dir_structure(), st.data())
+    def test_excluded_not_copied(self, structure, data):
+        """ Should not copy excluded files """
+        with nested_dirs(structure) as src:
+            with tempfile.TemporaryDirectory() as dst_name:
+                objs = self.files_from_walk(src.name)
+                if objs:
+                    excluded = data.draw(st.lists(st.sampled_from(objs), max_size=len(objs), unique=True))
+                else:
+                    excluded = []
+                fm.copy_tree(src.name, dst_name, exclude=excluded)
+                assert not set(excluded) & set(self.files_from_walk(dst_name))
 
 
-def test_ignore_missing_dir_error():
-    """
-    Checks whether the missing directory error is ignored
-    when we try to remove a directory which is not exist
-    """
-    tmp_dir = tempfile.mkdtemp()
-    shutil.rmtree(tmp_dir)
-    shutil.rmtree(tmp_dir, onerror=ignore_missing_dir_error)
+class TestIgnoreMissingDirError:
+
+    def test_dir_exists(self):
+        """ Dir is removed when it exists """
+        with tempfile.TemporaryDirectory() as dname:
+            shutil.rmtree(dname, onerror=fm.ignore_missing_dir_error)
+            assert not os.path.isdir(dname)
+
+    def test_dir_does_not_exist(self):
+        """ No error is raised whether the dir exists or not """
+        with tempfile.TemporaryDirectory() as dname:
+            shutil.rmtree(dname, onerror=fm.ignore_missing_dir_error)
+            shutil.rmtree(dname, onerror=fm.ignore_missing_dir_error)
 
 
 class TestFdOpen:
-    def test_open_dir(self):
+
+    def test_opens_dir(self):
         """
         Checks whether two file descriptors are pointing to the same directory
         """
         with tempfile.TemporaryDirectory() as tmp_dir:
             dir_fd = os.open(tmp_dir, os.O_RDONLY)
-            with fd_open(tmp_dir) as fdd:
+            with fm.fd_open(tmp_dir) as fdd:
                 assert os.path.sameopenfile(fdd, dir_fd)
 
-    def test_open_file(self):
+    def test_opens_file(self):
         """
         Checks whether two file descriptors are pointing to the same file
         """
         with tempfile.NamedTemporaryFile() as file:
             file_fd = os.open(file.name, os.O_RDONLY)
-            with fd_open(file.name) as fdf:
+            with fm.fd_open(file.name) as fdf:
                 assert os.path.sameopenfile(fdf, file_fd)
 
-    def test_close(self):
+    def test_closes_dir(self):
         """
-        Checks whether the file or directory is closed
+        Checks whether the directory is closed
         """
         with tempfile.TemporaryDirectory() as tmp_dir:
-            with fd_open(tmp_dir) as fdd:
-                dir_fd = fdd
-            with pytest.raises(IOError):
-                os.close(dir_fd)
+            with fm.fd_open(tmp_dir) as fdd:
+                pass
+            with pytest.raises(OSError):
+                os.close(fdd)
+
+    def test_closes_file(self):
+        """
+        Checks whether the file is closed
+        """
+        with tempfile.NamedTemporaryFile() as file:
+            with fm.fd_open(file.name) as fdd:
+                pass
+            with pytest.raises(OSError):
+                os.close(fdd)
+
+
+class TestFDLock:
+
+    @staticmethod
+    def locking_funt(fname: str, exclusive, queue: multiprocessing.Queue) -> None:
+        with open(fname) as fd:
+            queue.put('1 starting')
+            with fm.fd_lock(fd, exclusive=exclusive):
+                queue.put('1 locking')
+                time.sleep(2)
+                queue.put('1 unlocking')
+
+    @staticmethod
+    def locked_funt(fname: str, exclusive, queue: multiprocessing.Queue) -> None:
+        time.sleep(1)
+        with open(fname) as fd:
+            queue.put('2 starting')
+            with fm.fd_lock(fd, exclusive=exclusive):
+                queue.put('2 locking')
+                queue.put('2 unlocking')
+
+    @classmethod
+    def run_locking_test(cls, proc1_exclusive, proc2_exclusive):
+        with tempfile.NamedTemporaryFile() as file:
+            queue = multiprocessing.Queue()
+            proc1 = multiprocessing.Process(target=cls.locking_funt, args=(file.name, proc1_exclusive, queue))
+            proc2 = multiprocessing.Process(target=cls.locked_funt, args=(file.name, proc2_exclusive, queue))
+            proc1.start()
+            proc2.start()
+            proc1.join()
+            proc2.join()
+            result = []
+            while not queue.empty():
+                result.append(queue.get())
+            return result
+
+    blocking_behaviour = ['1 starting',
+                          '1 locking',
+                          '2 starting',
+                          '1 unlocking',
+                          '2 locking',
+                          '2 unlocking']
+
+    non_blocking_behaviour = ['1 starting',
+                              '1 locking',
+                              '2 starting',
+                              '2 locking',
+                              '2 unlocking',
+                              '1 unlocking']
+
+    def test_both_exclusive(self):
+        """ Second process should block if both request exclusive locks """
+        assert self.run_locking_test(True, True) == self.blocking_behaviour
+
+    def test_both_shared(self):
+        """ Neither process should block if both request shared locks """
+        assert self.run_locking_test(False, False) == self.non_blocking_behaviour
+
+    def test_first_shared(self):
+        """ Second process should block if only first requests shared lock """
+        assert self.run_locking_test(False, True) == self.blocking_behaviour
+
+    def test_second_shared(self):
+        """ Second process should block if only second requests shared lock """
+        assert self.run_locking_test(True, False) == self.blocking_behaviour
+
+
+class TestExtractZipStream:
+
+    @staticmethod
+    def trim(name: str, ignore: int) -> str:
+        *dnames, fname = name.split(os.sep)
+        return os.path.normpath(os.path.join(*dnames[ignore:], fname))
+
+    @given(nested_dir_structure())
+    def test_extracts_stream_to_dir(self, structure):
+        archive = zip_archive(structure)
+        with tempfile.TemporaryDirectory() as dname:
+            fm.extract_zip_stream(archive, dname, ignore_root_dirs=0)
+            archive_set = {os.path.normpath(name)
+                           for name in zipfile.ZipFile(BytesIO(archive)).namelist()
+                           if name != './'}
+            target_set = {os.path.normpath(os.path.join(os.path.relpath(root, dname), name))
+                          for root, dnames, fnames in os.walk(dname)
+                          for name in dnames + fnames}
+            assert target_set == archive_set
+
+    @given(nested_dir_structure(), st.integers(min_value=1, max_value=4))
+    def test_extracts_stream_to_dir_ignore_roots(self, structure, ignore):
+        archive = zip_archive(structure)
+        with tempfile.TemporaryDirectory() as dname:
+            fm.extract_zip_stream(archive, dname, ignore_root_dirs=ignore)
+            archive_set = {p for p in
+                           (self.trim(name, ignore) for name in zipfile.ZipFile(BytesIO(archive)).namelist())
+                           if p and p != '.'}
+            target_set = {os.path.normpath(os.path.join(os.path.relpath(root, dname), name))
+                          for root, dnames, fnames in os.walk(dname)
+                          for name in dnames + fnames}
+            assert target_set == archive_set

@@ -1,6 +1,4 @@
 import os
-import uuid
-import tempfile
 import shutil
 import fcntl
 import zipfile
@@ -13,11 +11,6 @@ from contextlib import contextmanager
 def clean_dir_name(name: str) -> str:
     """ Return name modified so that it can be used as a unix style directory name """
     return name.replace("/", "_")
-
-
-def random_tmpfile_name() -> str:
-    """ Return a path to a random filename in the system's temp directory """
-    return os.path.join(tempfile.gettempdir(), uuid.uuid4().hex)
 
 
 def recursive_iglob(root_dir: str) -> Generator[Tuple[str, str], None, None]:
@@ -46,7 +39,7 @@ def copy_tree(src: str, dst: str, exclude: Tuple = tuple()) -> List[Tuple[str, s
     copied = []
     for fd, file_or_dir in recursive_iglob(src):
         src_path = os.path.relpath(file_or_dir, src)
-        if src_path in exclude:
+        if src_path in exclude or any(os.path.relpath(src_path, ex) for ex in exclude):
             continue
         target = os.path.join(dst, src_path)
         if fd == "d":
