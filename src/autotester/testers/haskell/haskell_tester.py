@@ -102,9 +102,7 @@ class HaskellTester(Tester):
                 subprocess.run(cmd, stdout=subprocess.DEVNULL, universal_newlines=True, check=True)
                 with tempfile.NamedTemporaryFile(mode="w+", dir=this_dir) as sf:
                     cmd = ["runghc", "--", f"-i={haskell_lib}", f.name, f"--stats={sf.name}"]
-                    subprocess.run(
-                        cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, universal_newlines=True
-                    )
+                    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, universal_newlines=True)
                     results[test_file] = self._parse_test_results(csv.reader(sf))
         return results
 

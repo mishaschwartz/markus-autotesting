@@ -101,7 +101,7 @@ def extract_zip_stream(zip_byte_stream: bytes, destination: str, ignore_root_dir
             *dpaths, bname = fname.split(os.sep)
             dest = os.path.join(destination, *dpaths[ignore_root_dirs:])
             filename = os.path.join(dest, bname)
-            if filename.endswith('/'):
+            if filename.endswith("/"):
                 os.makedirs(filename, exist_ok=True)
             else:
                 os.makedirs(dest, exist_ok=True)

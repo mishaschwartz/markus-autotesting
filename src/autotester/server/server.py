@@ -27,9 +27,7 @@ from autotester.server.utils.file_management import (
     recursive_iglob,
     clean_dir_name,
 )
-from autotester.server.utils.resource_management import (
-    set_rlimits_before_test,
-)
+from autotester.server.utils.resource_management import set_rlimits_before_test
 from autotester.server.utils.redis_management import (
     clean_after,
     test_script_directory,
