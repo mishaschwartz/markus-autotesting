@@ -43,4 +43,4 @@ class TestGetReaperUsername:
         """ Should return the reaper username if there is a reaper username in the config """
         config = {"workers": [{"users": [{"name": "someuser", "reaper": "reaperuser"}]}]}
         with patch.dict("autotester.server.utils.resource_management.config._settings", config):
-            assert um.get_reaper_username("someuser") is "reaperuser"
+            assert um.get_reaper_username("someuser") == "reaperuser"
