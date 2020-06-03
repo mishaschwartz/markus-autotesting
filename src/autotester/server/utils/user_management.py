@@ -1,17 +1,8 @@
 import os
-import pwd
 from typing import Tuple
 from autotester.exceptions import TesterUserError
 from autotester.config import config
 from autotester.server.utils.string_management import decode_if_bytes
-
-
-def current_user() -> str:
-    """
-    Return the name of the current user,
-    ie. the one running this python process
-    """
-    return pwd.getpwuid(os.getuid()).pw_name
 
 
 def tester_user() -> Tuple[str, str]:
@@ -30,7 +21,7 @@ def tester_user() -> Tuple[str, str]:
     if not os.path.isdir(user_workspace):
         raise TesterUserError(f"No workspace directory for user: {user_name}")
 
-    return user_name, decode_if_bytes(user_workspace)
+    return user_name, user_workspace
 
 
 def get_reaper_username(test_username: str) -> str:

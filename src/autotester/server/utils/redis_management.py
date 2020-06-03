@@ -74,7 +74,7 @@ def _get_pop_interval_stat(queue_name: str) -> Tuple[int, int, int]:
     """
     r = redis_connection()
     start = r.hget(POP_INTERVAL_HASH, "{}_start".format(queue_name))
-    last = r.hget(POP_INTERVAL_HASH, "{}_count".format(queue_name))
+    last = r.hget(POP_INTERVAL_HASH, "{}_last".format(queue_name))
     count = r.hget(POP_INTERVAL_HASH, "{}_count".format(queue_name))
     return start, last, count
 

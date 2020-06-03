@@ -18,9 +18,7 @@ def set_rlimits_before_test() -> None:
     """
     for limit_str in config["rlimit_settings"].keys() | RLIMIT_ADJUSTMENTS.keys():
         limit = _rlimit_str2int(limit_str)
-        config_soft, config_hard = config["rlimit_settings"].get(
-            limit_str, (resource.RLIM_INFINITY, resource.RLIM_INFINITY)
-        )
+        config_soft, config_hard = config["rlimit_settings"].get(limit_str, resource.getrlimit(limit))
         curr_soft, curr_hard = resource.getrlimit(limit)
         # account for the fact that resource.RLIM_INFINITY == -1
         soft, hard = min(curr_soft, config_soft), min(curr_hard, config_hard)
@@ -34,17 +32,4 @@ def set_rlimits_before_test() -> None:
             hard -= adj
         # make sure the soft limit doesn't exceed the hard limit
         soft = min(hard, soft)
-        resource.setrlimit(limit, (soft, hard))
-
-
-def set_rlimits_before_cleanup() -> None:
-    """
-    Sets the rlimit settings specified in RLIMIT_ADJUSTMENTS and the config file
-    so that both the soft and hard limits are set as high as possible. This ensures
-    that cleanup processes will have as many resources as possible to run.
-    """
-    for limit_str in config["rlimit_settings"].keys() | RLIMIT_ADJUSTMENTS.keys():
-        limit = _rlimit_str2int(limit_str)
-        soft, hard = resource.getrlimit(limit)
-        soft = max(soft, hard)
         resource.setrlimit(limit, (soft, hard))

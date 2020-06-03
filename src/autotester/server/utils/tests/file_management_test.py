@@ -48,7 +48,7 @@ def zip_archive(structure: List) -> bytes:
     """ Creates a zip archive of nested files/directories based on <structure> """
     with tempfile.NamedTemporaryFile() as f:
         with nested_dirs(structure) as d:
-            with zipfile.ZipFile(f.name, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            with zipfile.ZipFile(f.name, "w", zipfile.ZIP_DEFLATED) as zipf:
                 for root, _, fnames in os.walk(d.name):
                     root_path = os.path.relpath(root, d.name)
                     zipf.write(root, arcname=root_path)
@@ -71,7 +71,6 @@ class TestCleanDirName:
 
 
 class TestRecursiveIglob:
-
     def file_counter(self, struc):
         if isinstance(struc, int):
             return struc
@@ -86,14 +85,14 @@ class TestRecursiveIglob:
     def test_yield_all_files(self, structure):
         """ Should find all files recursively in the directory """
         with nested_dirs(structure) as d:
-            files = [fname for fd, fname in fm.recursive_iglob(d.name) if fd == 'f']
+            files = [fname for fd, fname in fm.recursive_iglob(d.name) if fd == "f"]
             assert len(files) == self.file_counter(structure)
 
     @given(nested_dir_structure())
     def test_yield_all_dirs(self, structure):
         """ Should find all files recursively in the directory """
         with nested_dirs(structure) as d:
-            dirs = [dname for fd, dname in fm.recursive_iglob(d.name) if fd == 'd']
+            dirs = [dname for fd, dname in fm.recursive_iglob(d.name) if fd == "d"]
             assert len(dirs) + 1 == self.dir_counter(structure)  # +1 to include the root directory
 
     @given(nested_dir_structure())
@@ -104,17 +103,18 @@ class TestRecursiveIglob:
             for fd, name in fm.recursive_iglob(d.name):
                 dir_name = os.path.dirname(name)
                 assert dir_name in visited  # yielded child before parent
-                if fd == 'd':
+                if fd == "d":
                     visited.append(name)
 
 
 class TestCopyTree:
-
     @staticmethod
     def files_from_walk(src):
-        return [os.path.relpath(os.path.join(root, name), src)
-                for root, dnames, fnames in os.walk(src)
-                for name in dnames + fnames]
+        return [
+            os.path.relpath(os.path.join(root, name), src)
+            for root, dnames, fnames in os.walk(src)
+            for name in dnames + fnames
+        ]
 
     @given(nested_dir_structure())
     def test_files_are_created(self, structure):
@@ -148,7 +148,6 @@ class TestCopyTree:
 
 
 class TestIgnoreMissingDirError:
-
     def test_dir_exists(self):
         """ Dir is removed when it exists """
         with tempfile.TemporaryDirectory() as dname:
@@ -163,7 +162,6 @@ class TestIgnoreMissingDirError:
 
 
 class TestFdOpen:
-
     def test_opens_dir(self):
         """
         Checks whether two file descriptors are pointing to the same directory
@@ -204,24 +202,23 @@ class TestFdOpen:
 
 
 class TestFDLock:
-
     @staticmethod
     def locking_funt(fname: str, exclusive, queue: multiprocessing.Queue) -> None:
         with open(fname) as fd:
-            queue.put('1 starting')
+            queue.put("1 starting")
             with fm.fd_lock(fd, exclusive=exclusive):
-                queue.put('1 locking')
+                queue.put("1 locking")
                 time.sleep(2)
-                queue.put('1 unlocking')
+                queue.put("1 unlocking")
 
     @staticmethod
     def locked_funt(fname: str, exclusive, queue: multiprocessing.Queue) -> None:
         time.sleep(1)
         with open(fname) as fd:
-            queue.put('2 starting')
+            queue.put("2 starting")
             with fm.fd_lock(fd, exclusive=exclusive):
-                queue.put('2 locking')
-                queue.put('2 unlocking')
+                queue.put("2 locking")
+                queue.put("2 unlocking")
 
     @classmethod
     def run_locking_test(cls, proc1_exclusive, proc2_exclusive):
@@ -238,19 +235,9 @@ class TestFDLock:
                 result.append(queue.get())
             return result
 
-    blocking_behaviour = ['1 starting',
-                          '1 locking',
-                          '2 starting',
-                          '1 unlocking',
-                          '2 locking',
-                          '2 unlocking']
+    blocking_behaviour = ["1 starting", "1 locking", "2 starting", "1 unlocking", "2 locking", "2 unlocking"]
 
-    non_blocking_behaviour = ['1 starting',
-                              '1 locking',
-                              '2 starting',
-                              '2 locking',
-                              '2 unlocking',
-                              '1 unlocking']
+    non_blocking_behaviour = ["1 starting", "1 locking", "2 starting", "2 locking", "2 unlocking", "1 unlocking"]
 
     def test_both_exclusive(self):
         """ Second process should block if both request exclusive locks """
@@ -270,7 +257,6 @@ class TestFDLock:
 
 
 class TestExtractZipStream:
-
     @staticmethod
     def trim(name: str, ignore: int) -> str:
         *dnames, fname = name.split(os.sep)
@@ -281,12 +267,14 @@ class TestExtractZipStream:
         archive = zip_archive(structure)
         with tempfile.TemporaryDirectory() as dname:
             fm.extract_zip_stream(archive, dname, ignore_root_dirs=0)
-            archive_set = {os.path.normpath(name)
-                           for name in zipfile.ZipFile(BytesIO(archive)).namelist()
-                           if name != './'}
-            target_set = {os.path.normpath(os.path.join(os.path.relpath(root, dname), name))
-                          for root, dnames, fnames in os.walk(dname)
-                          for name in dnames + fnames}
+            archive_set = {
+                os.path.normpath(name) for name in zipfile.ZipFile(BytesIO(archive)).namelist() if name != "./"
+            }
+            target_set = {
+                os.path.normpath(os.path.join(os.path.relpath(root, dname), name))
+                for root, dnames, fnames in os.walk(dname)
+                for name in dnames + fnames
+            }
             assert target_set == archive_set
 
     @given(nested_dir_structure(), st.integers(min_value=1, max_value=4))
@@ -294,10 +282,14 @@ class TestExtractZipStream:
         archive = zip_archive(structure)
         with tempfile.TemporaryDirectory() as dname:
             fm.extract_zip_stream(archive, dname, ignore_root_dirs=ignore)
-            archive_set = {p for p in
-                           (self.trim(name, ignore) for name in zipfile.ZipFile(BytesIO(archive)).namelist())
-                           if p and p != '.'}
-            target_set = {os.path.normpath(os.path.join(os.path.relpath(root, dname), name))
-                          for root, dnames, fnames in os.walk(dname)
-                          for name in dnames + fnames}
+            archive_set = {
+                p
+                for p in (self.trim(name, ignore) for name in zipfile.ZipFile(BytesIO(archive)).namelist())
+                if p and p != "."
+            }
+            target_set = {
+                os.path.normpath(os.path.join(os.path.relpath(root, dname), name))
+                for root, dnames, fnames in os.walk(dname)
+                for name in dnames + fnames
+            }
             assert target_set == archive_set
