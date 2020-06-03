@@ -70,7 +70,7 @@ class _Config:
 
         self._settings = self._load_from_yaml()
 
-    def __getitem__(self, key: Union[str, Tuple[str, ...]]) -> ConfigValues:
+    def __getitem__(self, key: Union[str, Tuple[Union[str, int], ...]]) -> ConfigValues:
         """
         Return the value in self._settings that corresponds to key.
 
