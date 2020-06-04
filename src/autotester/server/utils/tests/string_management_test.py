@@ -4,17 +4,17 @@ from autotester.server.utils import string_management as sm
 
 
 class TestDecodeIfBytes:
-    @given(st.from_regex(".*", fullmatch=True))
+    @given(st.from_regex(r"[\w\d]*", fullmatch=True))
     def test_decodes_string(self, string):
         """ Returns original string """
         assert string == sm.decode_if_bytes(string)
 
-    @given(st.from_regex(r".*", fullmatch=True))
+    @given(st.from_regex(r"[\w\d]*", fullmatch=True))
     def test_decodes_bytes(self, string):
         """ Returns original string """
         assert string == sm.decode_if_bytes(string.encode("utf-8", "ignore"))
 
-    @given(st.from_regex(r".*", fullmatch=True))
+    @given(st.from_regex(r"[\w\d]*", fullmatch=True))
     def test_decodes_bytes_non_utf8(self, string):
         """ Returns original string """
         assert string == sm.decode_if_bytes(string.encode("utf-16", "ignore"), "utf-16")

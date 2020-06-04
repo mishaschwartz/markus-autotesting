@@ -22,8 +22,6 @@ from autotester.server.utils.user_management import (
 from autotester.server.utils.file_management import (
     copy_tree,
     ignore_missing_dir_error,
-    fd_open,
-    fd_lock,
     recursive_iglob,
     clean_dir_name,
 )
@@ -285,13 +283,21 @@ def _copy_test_script_files(client: ClientType, tests_path: str) -> List[Tuple[s
     Copy test script files for a given assignment to the tests_path
     directory if they exist. tests_path may already exist and contain
     files and subdirectories.
+
+    If the call to copy_tree raises a FileNotFoundError because the test
+    script directory has changed, retry the call to this function.
     """
     test_script_outer_dir = test_script_directory(client.unique_script_str())
     test_script_dir = os.path.join(test_script_outer_dir, FILES_DIRNAME)
     if os.path.isdir(test_script_dir):
-        with fd_open(test_script_dir) as fd:
-            with fd_lock(fd, exclusive=False):
-                return copy_tree(test_script_dir, tests_path)
+        try:
+            return copy_tree(test_script_dir, tests_path)
+        except FileNotFoundError:
+            if test_script_directory(client.unique_script_str()) != test_script_outer_dir:
+                _clear_working_directory(tests_path, getpass.getuser())
+                return _copy_test_script_files(client, tests_path)
+            else:
+                raise
     return []
 
 
@@ -472,7 +478,5 @@ def update_test_specs(client_type: str, client_data: Dict) -> None:
     test_script_directory(unique_script_str, set_to=new_dir)
 
     if old_test_script_dir is not None and os.path.isdir(old_test_script_dir):
-        with fd_open(old_test_script_dir) as fd:
-            with fd_lock(fd, exclusive=True):
-                _destroy_tester_environments(old_test_script_dir)
-                shutil.rmtree(old_test_script_dir, onerror=ignore_missing_dir_error)
+        _destroy_tester_environments(old_test_script_dir)
+        shutil.rmtree(old_test_script_dir, onerror=ignore_missing_dir_error)

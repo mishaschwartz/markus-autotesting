@@ -1,11 +1,8 @@
 import os
-import pytest
 import tempfile
 import contextlib
 import shutil
-import time
 import zipfile
-import multiprocessing
 from io import BytesIO
 from hypothesis import given
 from hypothesis import strategies as st
@@ -150,110 +147,27 @@ class TestCopyTree:
 class TestIgnoreMissingDirError:
     def test_dir_exists(self):
         """ Dir is removed when it exists """
-        with tempfile.TemporaryDirectory() as dname:
-            shutil.rmtree(dname, onerror=fm.ignore_missing_dir_error)
-            assert not os.path.isdir(dname)
+        d = tempfile.TemporaryDirectory()
+        try:
+            shutil.rmtree(d.name, onerror=fm.ignore_missing_dir_error)
+            assert not os.path.isdir(d.name)
+        finally:
+            try:
+                d.cleanup()
+            except FileNotFoundError:
+                pass
 
     def test_dir_does_not_exist(self):
         """ No error is raised whether the dir exists or not """
-        with tempfile.TemporaryDirectory() as dname:
-            shutil.rmtree(dname, onerror=fm.ignore_missing_dir_error)
-            shutil.rmtree(dname, onerror=fm.ignore_missing_dir_error)
-
-
-class TestFdOpen:
-    def test_opens_dir(self):
-        """
-        Checks whether two file descriptors are pointing to the same directory
-        """
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            dir_fd = os.open(tmp_dir, os.O_RDONLY)
-            with fm.fd_open(tmp_dir) as fdd:
-                assert os.path.sameopenfile(fdd, dir_fd)
-
-    def test_opens_file(self):
-        """
-        Checks whether two file descriptors are pointing to the same file
-        """
-        with tempfile.NamedTemporaryFile() as file:
-            file_fd = os.open(file.name, os.O_RDONLY)
-            with fm.fd_open(file.name) as fdf:
-                assert os.path.sameopenfile(fdf, file_fd)
-
-    def test_closes_dir(self):
-        """
-        Checks whether the directory is closed
-        """
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            with fm.fd_open(tmp_dir) as fdd:
+        d = tempfile.TemporaryDirectory()
+        try:
+            shutil.rmtree(d.name, onerror=fm.ignore_missing_dir_error)
+            shutil.rmtree(d.name, onerror=fm.ignore_missing_dir_error)
+        finally:
+            try:
+                d.cleanup()
+            except FileNotFoundError:
                 pass
-            with pytest.raises(OSError):
-                os.close(fdd)
-
-    def test_closes_file(self):
-        """
-        Checks whether the file is closed
-        """
-        with tempfile.NamedTemporaryFile() as file:
-            with fm.fd_open(file.name) as fdd:
-                pass
-            with pytest.raises(OSError):
-                os.close(fdd)
-
-
-class TestFDLock:
-    @staticmethod
-    def locking_funt(fname: str, exclusive, queue: multiprocessing.Queue) -> None:
-        with open(fname) as fd:
-            queue.put("1 starting")
-            with fm.fd_lock(fd, exclusive=exclusive):
-                queue.put("1 locking")
-                time.sleep(2)
-                queue.put("1 unlocking")
-
-    @staticmethod
-    def locked_funt(fname: str, exclusive, queue: multiprocessing.Queue) -> None:
-        time.sleep(1)
-        with open(fname) as fd:
-            queue.put("2 starting")
-            with fm.fd_lock(fd, exclusive=exclusive):
-                queue.put("2 locking")
-                queue.put("2 unlocking")
-
-    @classmethod
-    def run_locking_test(cls, proc1_exclusive, proc2_exclusive):
-        with tempfile.NamedTemporaryFile() as file:
-            queue = multiprocessing.Queue()
-            proc1 = multiprocessing.Process(target=cls.locking_funt, args=(file.name, proc1_exclusive, queue))
-            proc2 = multiprocessing.Process(target=cls.locked_funt, args=(file.name, proc2_exclusive, queue))
-            proc1.start()
-            proc2.start()
-            proc1.join()
-            proc2.join()
-            result = []
-            while not queue.empty():
-                result.append(queue.get())
-            return result
-
-    blocking_behaviour = ["1 starting", "1 locking", "2 starting", "1 unlocking", "2 locking", "2 unlocking"]
-
-    non_blocking_behaviour = ["1 starting", "1 locking", "2 starting", "2 locking", "2 unlocking", "1 unlocking"]
-
-    def test_both_exclusive(self):
-        """ Second process should block if both request exclusive locks """
-        assert self.run_locking_test(True, True) == self.blocking_behaviour
-
-    def test_both_shared(self):
-        """ Neither process should block if both request shared locks """
-        assert self.run_locking_test(False, False) == self.non_blocking_behaviour
-
-    def test_first_shared(self):
-        """ Second process should block if only first requests shared lock """
-        assert self.run_locking_test(False, True) == self.blocking_behaviour
-
-    def test_second_shared(self):
-        """ Second process should block if only second requests shared lock """
-        assert self.run_locking_test(True, False) == self.blocking_behaviour
 
 
 class TestExtractZipStream:
